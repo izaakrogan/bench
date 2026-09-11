@@ -100,5 +100,4 @@ harbor run \
   --job-name "$job_name" -o jobs -y
 
 echo
-echo "Finished jobs/$job_name. Harbor exits 0 even when trials fail, so check the results:"
-echo "  python3 collect.py"
+echo "Finished jobs/$job_name. Harbor exits 0 even when trials fail, so go by the reward above."
