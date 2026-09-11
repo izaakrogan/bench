@@ -59,7 +59,7 @@ Then run these two commands, one on each of two laptops in your team so they run
 ./tb <task> terminus-2
 ```
 
-Each command runs three attempts, two at a time, and takes roughly <fill> minutes and costs roughly <fill>.
+Each command runs three attempts, two at a time, and takes roughly 10 minutes and costs roughly $0.15.
 
 ## 4. Reading results
 
