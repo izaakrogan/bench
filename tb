@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Run one Terminal-Bench task with Harbor.
+# Usage: ./tb <task> <agent> [attempts] [concurrency] [-m model]
+set -eo pipefail
+
+DATASET="terminal-bench-sample@2.0"
+DEFAULT_MODEL="anthropic/claude-haiku-4-5"
+TASKS="build-cython-ext chess-best-move configure-git-webserver fix-code-vulnerability log-summary-date-ranges polyglot-c-py qemu-alpine-ssh qemu-startup regex-log sqlite-with-gcov"
+ENV_FILE="$HOME/.tb.env"
+
+usage() {
+  echo "Usage: ./tb <task> <agent> [attempts] [concurrency] [-m model]"
+  echo "  agent: claude-code, terminus-2 or oracle"
+  echo "  attempts defaults to 3, concurrency to 2, model to $DEFAULT_MODEL"
+  echo "  tasks: $TASKS"
+}
+
+positional=()
+model=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -m|--model)
+      [ $# -ge 2 ] || { echo "-m needs a model name" >&2; exit 1; }
+      model="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      positional+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#positional[@]} -lt 2 ] || [ ${#positional[@]} -gt 4 ]; then
+  usage >&2
+  exit 1
+fi
+
+task="${positional[0]}"
+agent="${positional[1]}"
+attempts="${positional[2]:-3}"
+concurrency="${positional[3]:-2}"
+
+case " $TASKS " in
+  *" $task "*) ;;
+  *) echo "Unknown task: $task" >&2; usage >&2; exit 1 ;;
+esac
+
+cd "$(dirname "$0")"
+
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is not running. Start Docker Desktop and try again." >&2
+  exit 1
+fi
+
+model_args=()
+if [ "$agent" != "oracle" ]; then
+  if [ ! -f "$ENV_FILE" ]; then
+    echo "Missing $ENV_FILE. Put ANTHROPIC_API_KEY=... in it (see README)." >&2
+    exit 1
+  fi
+  set -a
+  . "$ENV_FILE"
+  set +a
+  model="${model:-$DEFAULT_MODEL}"
+  model_args=(-m "$model")
+fi
+
+# Ubuntu's default mirror was too slow to install anything, so noble images use
+# kernel.org instead. Debian images are left alone: this file breaks their apt.
+image="ghcr.io/laude-institute/terminal-bench/$task:2.0"
+codename="$(docker run --rm --platform linux/amd64 --entrypoint sh "$image" -c '. /etc/os-release && echo "$VERSION_CODENAME"')"
+mount_args=()
+if [ "$codename" = "noble" ]; then
+  mount_args=(--mounts "[{\"type\":\"bind\",\"source\":\"$PWD/ubuntu-noble-kernelorg.sources\",\"target\":\"/etc/apt/sources.list.d/ubuntu.sources\",\"read_only\":true}]")
+fi
+
+model_slug="$(printf '%s' "${model:-none}" | tr '/:' '--')"
+job_name="${task}__${agent}__${model_slug}__$(date +%Y%m%d-%H%M%S)"
+
+harbor run \
+  -d "$DATASET" -i "$task" \
+  -a "$agent" ${model_args[@]+"${model_args[@]}"} \
+  -k "$attempts" -n "$concurrency" \
+  ${mount_args[@]+"${mount_args[@]}"} \
+  --job-name "$job_name" -o jobs -y
+
+echo
+echo "Finished jobs/$job_name. Harbor exits 0 even when trials fail, so check the results:"
+echo "  python3 collect.py"
