@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run one Terminal-Bench task with Harbor.
-# Usage: ./tb <task> <agent> [attempts] [concurrency] [-m model]
+# Usage: ./tb <task> <agent> [attempts] [concurrency] [-m model] [--skill dir]
 set -eo pipefail
 
 DATASET="terminal-bench-sample@2.0"
@@ -9,19 +9,26 @@ TASKS="build-cython-ext chess-best-move configure-git-webserver fix-code-vulnera
 ENV_FILE="$HOME/.tb.env"
 
 usage() {
-  echo "Usage: ./tb <task> <agent> [attempts] [concurrency] [-m model]"
-  echo "  agent: claude-code, terminus-2 or oracle"
+  echo "Usage: ./tb <task> <agent> [attempts] [concurrency] [-m model] [--skill dir]"
+  echo "  agent: claude-code, terminus-2, codex or oracle"
   echo "  attempts defaults to 3, concurrency to 2, model to $DEFAULT_MODEL"
   echo "  tasks: $TASKS"
 }
 
 positional=()
 model=""
+skill_args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -m|--model)
       [ $# -ge 2 ] || { echo "-m needs a model name" >&2; exit 1; }
       model="$2"
+      shift 2
+      ;;
+    --skill)
+      [ $# -ge 2 ] || { echo "--skill needs a directory" >&2; exit 1; }
+      [ -d "$2" ] || { echo "No such skill directory: $2" >&2; exit 1; }
+      skill_args+=(--skill "$(cd "$2" && pwd)")
       shift 2
       ;;
     -h|--help)
@@ -80,13 +87,16 @@ if [ "$codename" = "noble" ]; then
 fi
 
 model_slug="$(printf '%s' "${model:-none}" | tr '/:' '--')"
-job_name="${task}__${agent}__${model_slug}__$(date +%Y%m%d-%H%M%S)"
+skill_slug=""
+[ ${#skill_args[@]} -gt 0 ] && skill_slug="__skill"
+job_name="${task}__${agent}__${model_slug}${skill_slug}__$(date +%Y%m%d-%H%M%S)"
 
 harbor run \
   -d "$DATASET" -i "$task" \
   -a "$agent" ${model_args[@]+"${model_args[@]}"} \
   -k "$attempts" -n "$concurrency" \
   ${mount_args[@]+"${mount_args[@]}"} \
+  ${skill_args[@]+"${skill_args[@]}"} \
   --job-name "$job_name" -o jobs -y
 
 echo
